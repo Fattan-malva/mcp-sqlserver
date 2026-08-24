@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#0a0d12"/>
+  <rect x="24" y="24" width="1152" height="582" rx="28" fill="#10151f" stroke="#223044" stroke-width="2"/>
+  <g font-family="monospace" text-anchor="middle">
+    <text x="600" y="292" font-size="140" fill="#4ed6ff">&#9672;</text>
+    <text x="600" y="404" font-size="52" fill="#e8edf6" letter-spacing="2">mcp-sqlserv</text>
+    <text x="600" y="452" font-size="21" fill="#8496b1" letter-spacing="7">SPECIMEN LAB &middot; SQL SERVER READ-ONLY</text>
+    <text x="600" y="495" font-size="16" fill="#4a5a76" letter-spacing="3">MCP STREAMABLE HTTP &middot; OAUTH 2.1 &middot; AUDIT PENUH</text>
+  </g>
+</svg>

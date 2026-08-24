@@ -1,0 +1,37 @@
+# Dependencies & build output
+node_modules/
+dist/
+
+# Environment & secrets — JANGAN pernah commit
+.env
+.env.*
+!.env.example
+
+# Runtime data (SQLite: API keys, izin tabel, audit log, koneksi DB)
+data/
+oauth-test-data/
+*-test-data/
+*.db
+*.db-shm
+*.wal
+
+# Logs
+*.log
+npm-debug.log*
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor & IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Misc artifacts
+-o
+.core

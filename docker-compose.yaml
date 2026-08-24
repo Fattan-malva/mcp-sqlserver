@@ -1,0 +1,21 @@
+services:
+  mcp-sqlserv:
+    build: .
+    container_name: mcp-sqlserv
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - PORT=4000
+      - DATA_DIR=/app/data
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "4000:4000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    external: true
