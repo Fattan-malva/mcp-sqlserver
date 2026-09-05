@@ -50,7 +50,7 @@ THESIS: database diperlakukan sebagai spesimen di meja lab — satu plafond gela
 
 ## Copy
 
-Bahasa Indonesia; label teknis kapital mono; kesalahan menyebut masalah + perbaikan ("Cek di Google AI Studio lalu simpan ulang"); notifikasi key sekali tampil (amber), semua akses direkam (repeat: "tercatat di audit log").
+Bahasa Indonesia; label teknis kapital mono; kesalahan menyebut masalah + perbaikan ("Cek di ollama.com/settings/keys lalu simpan ulang"); notifikasi key sekali tampil (amber), semua akses direkam (repeat: "tercatat di audit log").
 
 ## Verdict / finish state
 

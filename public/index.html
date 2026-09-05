@@ -186,20 +186,20 @@
                 <div class="agent-head">
                   <div>
                     <h1>Agent Test</h1>
-                    <p class="view-sub">Chat with a Gemini model using the exact same MCP tools — prove the agent answers from real data.</p>
+                    <p class="view-sub">Chat with an Ollama Cloud model using the exact same MCP tools — prove the agent answers from real data.</p>
                   </div>
                   <button id="agent-change-key" class="btn btn--ghost btn--small">Change API Key</button>
                 </div>
 
                 <div id="agent-config-panel" class="plate plate--warn hidden">
-                  <div class="plate-cap"><span>PROBE CONFIG · GOOGLE GENAI</span><i class="led led--warn"></i></div>
-                  <p class="agent-config-note">Paste a Gemini API key (from <b>Google AI Studio</b> / Gemini API) and the model name. The key is held <b>in server memory</b> and is lost on restart — never written to disk.</p>
+                  <div class="plate-cap"><span>PROBE CONFIG · OLLAMA CLOUD</span><i class="led led--warn"></i></div>
+                  <p class="agent-config-note">Paste an Ollama Cloud API key (from <b>ollama.com/settings/keys</b>) and the cloud model name. The key is held <b>in server memory</b> and is lost on restart — never written to disk.</p>
                   <form id="agent-config-form">
-                    <label class="field-label" for="agent-key-input">GEMINI API KEY</label>
+                    <label class="field-label" for="agent-key-input">OLLAMA CLOUD API KEY</label>
                     <div class="field"><input type="password" id="agent-key-input" placeholder="paste API key here" autocomplete="off" required spellcheck="false" /></div>
                     <div class="agent-config-row">
-                      <label class="field-label" for="agent-model-input">MODEL NAME (BLANK = AUTO GEMINI-FLASH-LATEST)</label>
-                      <div class="field"><input type="text" id="agent-model-input" placeholder="e.g. gemini-3.6-flash" autocomplete="off" spellcheck="false" /></div>
+                      <label class="field-label" for="agent-model-input">CLOUD MODEL NAME (BLANK = AUTO GPT-OSS:120B)</label>
+                      <div class="field"><input type="text" id="agent-model-input" placeholder="e.g. gpt-oss:120b" autocomplete="off" spellcheck="false" /></div>
                     </div>
                     <div id="agent-config-msg" class="error-text"></div>
                     <div class="row">
@@ -288,7 +288,7 @@
             <div class="plate">
               <div class="plate-cap"><span>ISSUE NEW KEY</span><i class="led led--idle"></i></div>
               <div class="row">
-                <label class="field grow" for="key-name"><input type="text" id="key-name" placeholder="Key name, e.g. ai-chat-gemini" /></label>
+                <label class="field grow" for="key-name"><input type="text" id="key-name" placeholder="Key name, e.g. ai-chat-ollama" /></label>
                 <button id="create-key-btn" class="btn btn--primary">Create API Key</button>
               </div>
               <div id="key-result" class="hidden"></div>

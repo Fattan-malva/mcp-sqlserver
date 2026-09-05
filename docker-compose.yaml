@@ -12,7 +12,7 @@ services:
     ports:
       - "4000:4000"
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.docker.internal:10.89.0.1"
     networks:
       - app-network
 

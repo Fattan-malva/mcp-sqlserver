@@ -1,6 +1,6 @@
 import express from 'express';
 import { z } from 'zod';
-import { GoogleGenAI, type Content, type Part } from '@google/genai';
+import { Ollama, type ChatResponse, type Message, type Tool } from 'ollama';
 import { getEffectiveTools, type ToolContext } from '../mcp/tools.js';
 import type { ApiKeyRow } from '../db/storage.js';
 
@@ -9,10 +9,15 @@ const AGENT_TIMEOUT_MS = 120_000;
 const MAX_TOTAL_TEXT = 60_000;
 const MAX_HISTORY_MSGS = 40;
 
+// Ollama Cloud only — https://ollama.com acts as the remote Ollama host.
+// Auth: API key from https://ollama.com/settings/keys via `Authorization: Bearer <key>`.
+const OLLAMA_HOST = (process.env.OLLAMA_HOST ?? 'https://ollama.com').replace(/\/+$/, '');
+const DEFAULT_MODEL = process.env.OLLAMA_MODEL?.trim() || 'gpt-oss:120b';
+
 interface AgentSession {
   apiKey: string;
   model: string;
-  history: Content[];
+  history: Message[];
   busy: boolean;
 }
 
@@ -56,6 +61,13 @@ function sessionFor(user: string): AgentSession {
   return s;
 }
 
+function ollamaClient(apiKey: string): Ollama {
+  return new Ollama({
+    host: OLLAMA_HOST,
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+}
+
 const OPENAPI_ALLOW = new Set([
   'type', 'properties', 'required', 'additionalProperties', 'items', 'description',
   'enum', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf',
@@ -84,22 +96,41 @@ function sanitizeOpenApi(schema: unknown): void {
   for (const comb of ['anyOf', 'oneOf', 'allOf']) sanitizeOpenApi(obj[comb]);
 }
 
-function functionDeclarations() {
+function ollamaTools(): Tool[] {
   return getEffectiveTools().map((t) => {
     const schema = z.toJSONSchema(t.inputSchema) as Record<string, unknown>;
     sanitizeOpenApi(schema);
-    return { name: t.name, description: `${t.title}. ${t.description}`, parameters: schema };
+    return {
+      type: 'function',
+      function: {
+        name: t.name,
+        description: `${t.title}. ${t.description}`,
+        parameters: schema as Tool['function']['parameters'],
+      },
+    };
   });
 }
 
-function parseFunctionDeclarations(parts: Part[]): { name: string; args: Record<string, unknown> }[] | null {
-  const out: { name: string; args: Record<string, unknown> }[] = [];
-  for (const part of parts) {
-    const fc = part.functionCall;
-    if (!fc?.name) continue;
-    out.push({ name: fc.name, args: (fc.args ?? {}) as Record<string, unknown> });
+interface PendingCall {
+  name: string;
+  args: Record<string, unknown>;
+}
+
+// Merge streamed tool_calls, deduplicating identical (name + args) repeats
+// that Ollama may emit across chunks.
+function mergeToolCalls(
+  acc: PendingCall[],
+  incoming: Array<{ function?: { name?: string; arguments?: unknown } }> | undefined,
+): void {
+  if (!incoming?.length) return;
+  for (const tc of incoming) {
+    const name = tc?.function?.name;
+    if (!name) continue;
+    const args = (tc.function?.arguments ?? {}) as Record<string, unknown>;
+    const fingerprint = `${name}|${JSON.stringify(args)}`;
+    const dup = acc.some((c) => `${c.name}|${JSON.stringify(c.args)}` === fingerprint);
+    if (!dup) acc.push({ name, args });
   }
-  return out.length ? out : null;
 }
 
 interface ToolRun {
@@ -166,6 +197,11 @@ function withDeadline<T>(p: Promise<T>, ms: number, msg: string): Promise<T> {
 
 const RETRY_BACKOFF_MS = [2_000, 5_000, 10_000];
 
+function errStatus(err: unknown): number | undefined {
+  const e = err as { status?: number; status_code?: number };
+  return e?.status ?? e?.status_code;
+}
+
 async function* streamWithRetry(
   attempt: () => Promise<AsyncGenerator<unknown>>,
   deadline: number,
@@ -181,9 +217,9 @@ async function* streamWithRetry(
       }
       return;
     } catch (err) {
-      const t = (err as { status?: number })?.status;
+      const t = errStatus(err);
       const msg = err instanceof Error ? err.message : String(err);
-      const transient = t === 429 || t === 503 || /high demand|rate limit|quota|UNAVAILABLE|RESOURCE_EXHAUSTED/i.test(msg);
+      const transient = t === 429 || t === 503 || /high demand|rate limit|too many requests|quota|overloaded|try again|UNAVAILABLE|RESOURCE_EXHAUSTED/i.test(msg);
       if (!transient || state.consumed || i >= RETRY_BACKOFF_MS.length || deadline - Date.now() <= RETRY_BACKOFF_MS[i]) {
         throw err;
       }
@@ -193,74 +229,67 @@ async function* streamWithRetry(
 }
 
 async function* runTurn(session: AgentSession, userText: string) {
-  const ai = new GoogleGenAI({ apiKey: session.apiKey });
-  const contents: Content[] = [...session.history, { role: 'user', parts: [{ text: userText }] }];
+  const client = ollamaClient(session.apiKey);
+  const tools = ollamaTools();
+  const messages: Message[] = [
+    { role: 'system', content: SYSTEM_PROMPT() },
+    ...session.history,
+    { role: 'user', content: userText },
+  ];
   const deadline = Date.now() + AGENT_TIMEOUT_MS;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const modelParts: Part[] = [];
     let totalChunk = '';
-    let finishReason: string | null = null;
+    const pending: PendingCall[] = [];
 
     const gen = streamWithRetry(async () => {
       if (Date.now() > deadline) throw new Error('Agent melewati batas waktu (120 detik).');
-      return withDeadline(
-        ai.models.generateContentStream({
+      const stream = await withDeadline(
+        client.chat({
           model: session.model,
-          contents,
-          config: {
-            systemInstruction: { parts: [{ text: SYSTEM_PROMPT() }] },
-            tools: [{ functionDeclarations: functionDeclarations() }],
-            temperature: 0.4,
-            maxOutputTokens: 8192,
-          },
+          messages,
+          tools,
+          stream: true,
+          options: { temperature: 0.4, num_predict: 8192 },
         }),
         deadline - Date.now(),
         'Agent melewati batas waktu (120 detik).',
       );
+      return stream as unknown as AsyncGenerator<unknown>;
     }, deadline);
 
     for await (const chunk of gen) {
       if (Date.now() > deadline) throw new Error('Agent melewati batas waktu (120 detik).');
-      const candidate = (chunk as { candidates?: Array<{ finishReason?: string; content?: { parts?: Part[] } }> }).candidates?.[0];
-      if (candidate?.finishReason) finishReason = candidate.finishReason;
-      for (const part of candidate?.content?.parts ?? []) {
-        modelParts.push(part);
-        if (part.text?.length) {
-          totalChunk += part.text;
-          yield { type: 'delta', text: part.text };
-        }
+      const c = chunk as Partial<ChatResponse> & { error?: string };
+      if (c.error) throw new Error(c.error);
+      const content = c.message?.content ?? '';
+      if (content) {
+        totalChunk += content;
+        yield { type: 'delta', text: content };
       }
-      if (totalChunk.length + JSON.stringify(modelParts).length > MAX_TOTAL_TEXT) {
+      mergeToolCalls(pending, c.message?.tool_calls);
+      if (totalChunk.length > MAX_TOTAL_TEXT) {
         yield { type: 'delta', text: '\n\n_[Respons terlalu panjang, dihentikan oleh batas keamanan server.]_' };
         throw new Error('Respons melebihi batas keamanan (dipotong).');
       }
     }
-    if (!finishReason) finishReason = 'STOP';
 
-    const calls = parseFunctionDeclarations(modelParts);
-    if (calls && calls.length && finishReason !== 'SAFETY') {
-      const runs: ToolRun[] = [];
-      for (const call of calls) {
+    if (pending.length) {
+      messages.push({
+        role: 'assistant',
+        content: totalChunk,
+        tool_calls: pending.map((call) => ({ function: { name: call.name, arguments: call.args } })),
+      });
+      for (const call of pending) {
         const run = await runToolCall(call.name, call.args);
         yield { type: 'tool', run };
-        runs.push(run);
+        messages.push({ role: 'tool', tool_name: run.name, content: run.resultText });
       }
-      contents.push({ role: 'model', parts: modelParts });
-      contents.push({
-        role: 'user',
-        parts: runs.map((r) => ({
-          functionResponse: {
-            name: r.name,
-            response: r.ok ? { result: JSON.parse(r.resultText) } : { error: r.error },
-          },
-        })),
-      });
       continue;
     }
 
-    contents.push({ role: 'model', parts: modelParts });
-    session.history = contents.slice(-MAX_HISTORY_MSGS * 2);
+    messages.push({ role: 'assistant', content: totalChunk });
+    session.history = messages.filter((m) => m.role !== 'system').slice(-MAX_HISTORY_MSGS);
     yield { type: 'done', text: totalChunk, rounds: round + 1 };
     return;
   }
@@ -268,15 +297,15 @@ async function* runTurn(session: AgentSession, userText: string) {
 }
 
 function keyErrorToMessage(err: unknown): string {
-  const status = (err as { status?: number })?.status;
+  const status = errStatus(err);
   const message = err instanceof Error ? err.message : String(err);
-  if (status === 400 && /api key/i.test(message)) {
-    return `Invalid Google API key. Check the Gemini token and save it again. (${message})`;
+  if (status === 401 || status === 403 || /unauthorized/i.test(message)) {
+    return `Invalid Ollama Cloud API key. Check the key at ollama.com/settings/keys then save it again. (${message})`;
   }
-  if (status === 404 || /not found/i.test(message)) {
-    return `Model name is not available for this key: ${message}`;
+  if (status === 404 || /model .*not found|not found/i.test(message)) {
+    return `Model name is not available on Ollama Cloud for this key: ${message}`;
   }
-  return `Gemini failed to respond (${status ? 'HTTP ' + status : 'error'}): ${message}`;
+  return `Ollama Cloud failed to respond (${status ? 'HTTP ' + status : 'error'}): ${message}`;
 }
 
 export function agentRouter(): express.Router {
@@ -289,6 +318,9 @@ export function agentRouter(): express.Router {
       model: s.model || null,
       keyLast4: s.apiKey ? s.apiKey.slice(-4) : null,
       busy: s.busy,
+      provider: 'ollama-cloud',
+      host: OLLAMA_HOST,
+      defaultModel: DEFAULT_MODEL,
       tools: getEffectiveTools().map((t) => ({ name: t.name, title: t.title })),
     });
   });
@@ -304,11 +336,11 @@ export function agentRouter(): express.Router {
     if (!parsedModel.success) {
       return res.status(400).json({ error: parsedModel.error.issues[0]?.message ?? 'Invalid model name' });
     }
-    const model = parsedModel.data && parsedModel.data.length ? parsedModel.data : 'gemini-flash-latest';
+    const model = parsedModel.data && parsedModel.data.length ? parsedModel.data : DEFAULT_MODEL;
     s.apiKey = parsedToken.data;
     s.model = model;
     s.history = [];
-    res.json({ ok: true, model });
+    res.json({ ok: true, model, provider: 'ollama-cloud', host: OLLAMA_HOST });
   });
 
   router.delete('/config', (req, res) => {
@@ -331,7 +363,7 @@ export function agentRouter(): express.Router {
     const s = sessionFor(user);
     const message = String((req.body ?? {})?.message ?? '').trim().slice(0, 4000);
     if (!s.apiKey) {
-      res.status(400).json({ error: 'No Gemini API key yet. Save a key from Google AI Studio / Gemini API first.' });
+      res.status(400).json({ error: 'No Ollama Cloud API key yet. Save a key from ollama.com/settings/keys first.' });
       return;
     }
     if (!message) {
@@ -355,7 +387,7 @@ export function agentRouter(): express.Router {
       'X-Accel-Buffering': 'no',
     });
     res.flushHeaders();
-    sse(res, 'meta', { model: s.model });
+    sse(res, 'meta', { model: s.model, provider: 'ollama-cloud' });
 
     (async () => {
       for await (const evt of runTurn(s, message)) {
@@ -374,7 +406,7 @@ export function agentRouter(): express.Router {
   router.post('/probe', async (req, res) => {
     const user = (req as express.Request & { admin?: { user: string } }).admin?.user ?? 'admin';
     const s = sessionFor(user);
-    if (!s.apiKey) return res.status(400).json({ error: 'No Gemini API key.' });
+    if (!s.apiKey) return res.status(400).json({ error: 'No Ollama Cloud API key.' });
     const name = String(req.body?.tool ?? '');
     const tool = getEffectiveTools().find((t) => t.name === name);
     if (!tool) return res.status(400).json({ error: 'Unknown tool' });

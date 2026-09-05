@@ -2,7 +2,7 @@
 
 /* ============================================================
    MCP-SQLSERV — konsol "Slide Spekimen"
-   Agent Test = Gemini (Google AI Studio) memakai tool yang sama
+   Agent Test = Ollama Cloud memakai tool yang sama
    persis dengan MCP endpoint (/mcp), lewat /api/agent.
    ============================================================ */
 
@@ -491,7 +491,7 @@ function dashCards(s) {
       <span class="card-go"><i class="ph ph-arrow-right"></i></span>
       <div class="c-lab c-left"><i class="led led--on"></i>AGENT TEST</div>
       <div class="c-val">${s.dbConnected === true ? 'READY' : 'WAIT'}<small>${s.dbConnected === true ? ' probe' : ' db'}</small></div>
-      <div class="c-sub">Chat with Gemini using the same tools</div>
+      <div class="c-sub">Chat with Ollama Cloud using the same tools</div>
     </a>`;
 }
 
@@ -1130,7 +1130,7 @@ $('#agent-clear-key').addEventListener('click', () => {
     $('#agent-input').disabled = false;
     renderAgentStatus(await api('/api/agent/status'));
     $('#agent-config-panel').classList.remove('hidden');
-    welcomeMessage('Key cleared. Save a Google AI Studio API key to re-enable the probe.');
+    welcomeMessage('Key cleared. Save an Ollama Cloud API key to re-enable the probe.');
   }, { yes: 'Sure to clear?', revertMs: 5000 });
 });
 
@@ -1254,7 +1254,7 @@ async function sendAgentMessage(text, inputEl) {
           addProbeItem(payload.run);
         } else if (event === 'error') {
           bubble.classList.add('err');
-          body.innerHTML = `<p>${esc(payload.message || 'Failed to reach Gemini.')}</p>`;
+          body.innerHTML = `<p>${esc(payload.message || 'Failed to reach Ollama Cloud.')}</p>`;
         } else if (event === 'done') {
           if (payload.text) body.innerHTML = mdLite(payload.text);
           else body.innerHTML = '<p><em>(agent tidak menghasilkan teks)</em></p>';
@@ -1300,7 +1300,7 @@ async function loadConnectInfo() {
     </div>
     <div class="plate">
       <div class="plate-cap"><span>EXAMPLE MCP CLIENT CONFIG</span><i class="led led--idle"></i></div>
-      <p>This server can be connected to <b>any AI agent</b> that supports remote MCP Streamable HTTP — including Gemini/GenAI-based chat projects.</p>
+      <p>This server can be connected to <b>any AI agent</b> that supports remote MCP Streamable HTTP — including Ollama-based chat projects.</p>
       <pre>${esc(JSON.stringify(info.exampleConfig, null, 2))}</pre>
     </div>
     <div class="plate">

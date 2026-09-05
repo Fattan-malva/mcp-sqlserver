@@ -40,7 +40,7 @@
 | Audit log | Semua request AI tercatat: key, tool, tabel, filter, baris, durasi, status |
 | Rate limit | 60 req/menit per API key (dapat dikonfigurasi) |
 | Read-only total | Tool hanya menghasilkan `SELECT`; tidak ada jalur tulis sama sekali |
-| Agent Test | Chat langsung dengan model Gemini dari Web UI untuk uji end-to-end |
+| Agent Test | Chat langsung dengan model Ollama Cloud dari Web UI untuk uji end-to-end |
 
 ## Arsitektur
 
